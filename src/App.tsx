@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   MapPin,
   Navigation,
   Users,
   Star,
-  Clock,
   ArrowLeft,
   Search,
 } from 'lucide-react';
@@ -37,7 +36,7 @@ interface Provider {
 
 const JammApp = () => {
   const [currentScreen, setCurrentScreen] = useState('splash');
-  const [userLocation, setUserLocation] = useState<Location | null>(null);
+  const [, setUserLocation] = useState<Location | null>(null);
   const [selectedDestination, setSelectedDestination] = useState('');
 
   const hotspots: Hotspot[] = [

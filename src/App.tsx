@@ -1,50 +1,90 @@
-
 import { useState, useEffect } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
+import { Icon } from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { supabase } from './supabaseClient';
-import {
-  MapPin,
-  Navigation,
-  Users,
-  Star,
-  ArrowLeft,
-  Search,
-} from 'lucide-react';
 
-// TypeScript interfaces
-interface Location {
-  lat: number;
-  lng: number;
-}
+// Fix for default marker icons in Leaflet
+import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
+import markerIcon from 'leaflet/dist/images/marker-icon.png';
+import markerShadow from 'leaflet/dist/images/marker-shadow.png';
+
+// @ts-ignore
+delete Icon.Default.prototype._getIconUrl;
+Icon.Default.mergeOptions({
+  iconUrl: markerIcon,
+  iconRetinaUrl: markerIcon2x,
+  shadowUrl: markerShadow,
+});
 
 interface Hotspot {
   id: number;
   name: string;
-  lat: number;
-  lng: number;
-  count: number;
-  status: 'high' | 'medium' | 'low';
+  latitude: number;
+  longitude: number;
+  provider_count: number;
+  status: string;
 }
 
 interface Provider {
-  id: number;
+  id: string;
   name: string;
-  vehicle: string;
+  vehicle_number: string;
+  latitude: number;
+  longitude: number;
+  seats_available: number;
   rating: number;
-  reviews: number;
-  eta: number;
-  seatsAvailable: number;
-  fare: number;
+  is_online: boolean;
 }
 
-const JammApp = () => {
-  const [currentScreen, setCurrentScreen] = useState('splash');
-  const [, setUserLocation] = useState<Location | null>(null);
-  const [selectedDestination, setSelectedDestination] = useState('');
+type Screen = 'splash' | 'onboarding' | 'map' | 'destination' | 'providers' | 'confirmation';
 
+function App() {
+  const [currentScreen, setCurrentScreen] = useState<Screen>('splash');
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
-
   const [providers, setProviders] = useState<Provider[]>([]);
+  const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null);
+  const [loading, setLoading] = useState(true);
 
+  // User location (Bangalore city center as default)
+  const userLocation = { lat: 12.9716, lng: 77.5946 };
+
+  // Fetch hotspots from Supabase
+  useEffect(() => {
+    fetchHotspots();
+  }, []);
+
+  const fetchHotspots = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('hotspots')
+        .select('*');
+      
+      if (error) throw error;
+      if (data) setHotspots(data);
+    } catch (error) {
+      console.error('Error fetching hotspots:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch providers from Supabase
+  const fetchProviders = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('providers')
+        .select('*')
+        .eq('is_online', true);
+      
+      if (error) throw error;
+      if (data) setProviders(data);
+    } catch (error) {
+      console.error('Error fetching providers:', error);
+    }
+  };
+
+  // Auto-advance from splash
   useEffect(() => {
     if (currentScreen === 'splash') {
       const timer = setTimeout(() => setCurrentScreen('onboarding'), 2000);
@@ -52,1005 +92,404 @@ const JammApp = () => {
     }
   }, [currentScreen]);
 
-  useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setUserLocation({
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-          });
-        },
-        () => {
-          setUserLocation({ lat: 12.9716, lng: 77.5946 });
-        }
-      );
-    } else {
-      setUserLocation({ lat: 12.9716, lng: 77.5946 });
+  const goToScreen = (screen: Screen) => {
+    if (screen === 'providers') {
+      fetchProviders();
     }
-  }, []);
+    setCurrentScreen(screen);
+  };
 
-  // Fetch hotspots from Supabase
-useEffect(() => {
-  async function fetchHotspots() {
-    const { data, error } = await supabase
-      .from('hotspots')
-      .select('*');
-    
-    if (error) {
-      console.error('Error fetching hotspots:', error);
-      return;
-    }
-    
-    if (data) {
-      const formattedHotspots = data.map(h => ({
-        id: h.id,
-        name: h.name,
-        lat: h.latitude,
-        lng: h.longitude,
-        count: h.provider_count,
-        status: h.status as 'high' | 'medium' | 'low'
-      }));
-      setHotspots(formattedHotspots);
-    }
-  }
-  
-  fetchHotspots();
-}, []);
+  const bookRide = (provider: Provider) => {
+    setSelectedProvider(provider);
+    setCurrentScreen('confirmation');
+  };
 
-// Fetch providers from Supabase
-useEffect(() => {
-  async function fetchProviders() {
-    const { data, error } = await supabase
-      .from('providers')
-      .select('*')
-      .eq('is_online', true);
-    
-    if (error) {
-      console.error('Error fetching providers:', error);
-      return;
+  const getHotspotColor = (status: string) => {
+    switch (status) {
+      case 'high': return '#4caf50';
+      case 'medium': return '#ff9800';
+      case 'low': return '#f44336';
+      default: return '#999';
     }
-    
-    if (data) {
-      const formattedProviders = data.map(p => ({
-        id: p.id,
-        name: p.name,
-        vehicle: p.vehicle_number,
-        rating: p.rating,
-        reviews: 234, // Mock for now
-        eta: Math.floor(Math.random() * 10) + 1, // Mock ETA
-        seatsAvailable: p.seats_available,
-        fare: 45 // Mock fare
-      }));
-      setProviders(formattedProviders);
-    }
-  }
-  
-  fetchProviders();
-}, []);
+  };
 
-  const SplashScreen = () => (
-    <div className="screen splash-screen">
-      <div className="logo">J</div>
-      <div className="tagline">Share the Ride</div>
-      <div className="subtitle">
-        Transparent, sustainable mobility for everyone
+  // Splash Screen
+  if (currentScreen === 'splash') {
+    return (
+      <div style={{
+        height: '100vh',
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        alignItems: 'center',
+        color: 'white',
+        fontFamily: 'system-ui, -apple-system, sans-serif'
+      }}>
+        <div style={{
+          width: '120px',
+          height: '120px',
+          background: 'white',
+          borderRadius: '30px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '48px',
+          fontWeight: 'bold',
+          color: '#667eea',
+          marginBottom: '30px'
+        }}>J</div>
+        <div style={{ fontSize: '24px', fontWeight: 600, marginBottom: '10px' }}>Share the Ride</div>
+        <div style={{ fontSize: '16px', opacity: 0.9 }}>Transparent, sustainable mobility for everyone</div>
       </div>
-    </div>
-  );
+    );
+  }
 
-  const OnboardingScreen = () => (
-    <div className="screen onboarding-screen">
-      <button className="skip-btn" onClick={() => setCurrentScreen('map')}>
-        Skip
-      </button>
-      <div className="onboarding-content">
-        <div className="feature-card">
-          <MapPin size={36} />
-          <h3>Real-time Transparency</h3>
-          <p>See available seats, routes, and prices upfront</p>
-        </div>
-        <div className="feature-card">
-          <Users size={36} />
-          <h3>Community First</h3>
-          <p>Share rides, reduce costs, make friends</p>
-        </div>
-        <div className="feature-card">
-          <Navigation size={36} />
-          <h3>Eco-Smart Travel</h3>
-          <p>Reduce carbon footprint with shared mobility</p>
-        </div>
-      </div>
-      <div className="cta-section">
-        <button className="btn-primary" onClick={() => setCurrentScreen('map')}>
-          Explore Without Login
-        </button>
+  // Onboarding Screen
+  if (currentScreen === 'onboarding') {
+    return (
+      <div style={{
+        height: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        padding: '30px',
+        fontFamily: 'system-ui, -apple-system, sans-serif'
+      }}>
         <button
-          className="btn-secondary"
-          onClick={() => alert('Login with Phone + OTP coming soon!')}
-        >
-          Login / Sign Up
-        </button>
-      </div>
-    </div>
-  );
-
-  const MapScreen = () => (
-    <div className="screen map-screen">
-      <div
-        className="search-bar"
-        onClick={() => setCurrentScreen('destination')}
-      >
-        <Search size={20} />
-        <input type="text" placeholder="Where to?" readOnly />
-      </div>
-
-      <div className="map-container">
-        <div
-          className="user-marker"
+          onClick={() => goToScreen('map')}
           style={{
-            position: 'absolute',
-            top: '50%',
-            left: '50%',
-            transform: 'translate(-50%, -50%)',
+            alignSelf: 'flex-end',
+            padding: '8px 16px',
+            background: '#f0f0f0',
+            border: 'none',
+            borderRadius: '20px',
+            cursor: 'pointer'
           }}
-        >
-          <div className="pulse-ring"></div>
-          <div className="user-dot">📍</div>
+        >Skip</button>
+
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '20px' }}>
+          {[
+            { icon: '🗺️', title: 'Real-time Transparency', desc: 'See available seats, routes, and prices upfront' },
+            { icon: '👥', title: 'Community First', desc: 'Share rides, reduce costs, make friends' },
+            { icon: '🌱', title: 'Eco-Smart Travel', desc: 'Reduce carbon footprint with shared mobility' }
+          ].map((feature, i) => (
+            <div key={i} style={{
+              padding: '20px',
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              borderRadius: '20px',
+              color: 'white'
+            }}>
+              <div style={{ fontSize: '36px', marginBottom: '10px' }}>{feature.icon}</div>
+              <div style={{ fontSize: '18px', fontWeight: 600, marginBottom: '5px' }}>{feature.title}</div>
+              <div style={{ fontSize: '14px', opacity: 0.9 }}>{feature.desc}</div>
+            </div>
+          ))}
         </div>
 
-        {hotspots.map((hotspot, index) => (
-          <div
-            key={hotspot.id}
-            className="hotspot-marker"
+        <div style={{ paddingTop: '20px' }}>
+          <button
+            onClick={() => goToScreen('map')}
             style={{
-              position: 'absolute',
-              top: `${30 + index * 20}%`,
-              left: `${40 + index * 15}%`,
-              transform: 'translate(-50%, -50%)',
+              width: '100%',
+              padding: '16px',
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              color: 'white',
+              border: 'none',
+              borderRadius: '12px',
+              fontSize: '16px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              marginBottom: '12px'
             }}
-            onClick={() => setCurrentScreen('providers')}
-          >
-            <div className={`hotspot-badge ${hotspot.status}`}>
-              <div className="hotspot-icon">🚕</div>
-              <div className="hotspot-count">{hotspot.count}</div>
-            </div>
-            <div className="hotspot-label">{hotspot.name}</div>
-          </div>
-        ))}
-
-        <div className="map-grid"></div>
+          >Explore Without Login</button>
+        </div>
       </div>
+    );
+  }
 
-      <div className="bottom-sheet">
-        <div className="sheet-handle"></div>
-        <h3>Nearby Hotspots</h3>
-        <p>Tap a hotspot or enter destination to see available rides</p>
-        <div className="hotspot-list">
+  // Map Screen with Real Leaflet Map
+  if (currentScreen === 'map') {
+    return (
+      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+        {/* Search Bar */}
+        <div style={{
+          position: 'absolute',
+          top: '20px',
+          left: '20px',
+          right: '20px',
+          background: 'white',
+          borderRadius: '12px',
+          padding: '12px 16px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          zIndex: 1000,
+          cursor: 'pointer'
+        }} onClick={() => goToScreen('destination')}>
+          <span>🔍</span>
+          <span style={{ color: '#999' }}>Where to?</span>
+        </div>
+
+        {/* Real Leaflet Map */}
+        <MapContainer
+          center={[userLocation.lat, userLocation.lng]}
+          zoom={13}
+          style={{ height: '100%', width: '100%' }}
+        >
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+
+          {/* User Location */}
+          <Marker position={[userLocation.lat, userLocation.lng]}>
+            <Popup>Your Location</Popup>
+          </Marker>
+
+          {/* Hotspots as Circles */}
+          {hotspots.map((hotspot) => (
+            <Circle
+              key={hotspot.id}
+              center={[hotspot.latitude, hotspot.longitude]}
+              radius={150}
+              pathOptions={{
+                color: getHotspotColor(hotspot.status),
+                fillColor: getHotspotColor(hotspot.status),
+                fillOpacity: 0.3
+              }}
+            >
+              <Popup>
+                <div style={{ textAlign: 'center' }}>
+                  <strong>{hotspot.name}</strong><br />
+                  🚕 {hotspot.provider_count} autos available<br />
+                  <button
+                    onClick={() => goToScreen('providers')}
+                    style={{
+                      marginTop: '8px',
+                      padding: '6px 12px',
+                      background: '#667eea',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    See Rides
+                  </button>
+                </div>
+              </Popup>
+            </Circle>
+          ))}
+        </MapContainer>
+
+        {/* Bottom Sheet */}
+        <div style={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          background: 'white',
+          borderRadius: '20px 20px 0 0',
+          padding: '20px',
+          boxShadow: '0 -4px 12px rgba(0,0,0,0.1)',
+          maxHeight: '30%',
+          zIndex: 1000
+        }}>
+          <div style={{ width: '40px', height: '4px', background: '#ddd', borderRadius: '2px', margin: '0 auto 20px' }}></div>
+          <div style={{ fontSize: '18px', fontWeight: 600, marginBottom: '10px' }}>Nearby Hotspots</div>
+          <div style={{ fontSize: '14px', color: '#666' }}>
+            {loading ? 'Loading hotspots...' : `${hotspots.length} locations available`}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Destination Selection Screen
+  if (currentScreen === 'destination') {
+    return (
+      <div style={{ height: '100vh', padding: '20px', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
+          <span onClick={() => goToScreen('map')} style={{ cursor: 'pointer', fontSize: '24px' }}>←</span>
+          <input
+            type="text"
+            placeholder="Search destination"
+            style={{
+              flex: 1,
+              padding: '12px',
+              border: '1px solid #ddd',
+              borderRadius: '8px',
+              fontSize: '16px'
+            }}
+          />
+        </div>
+
+        <div style={{ marginBottom: '30px' }}>
+          <div style={{ fontSize: '14px', color: '#666', marginBottom: '10px' }}>Quick Access</div>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            {['🏠 Home', '💼 Work', '🎓 College'].map((label, i) => (
+              <button
+                key={i}
+                onClick={() => goToScreen('providers')}
+                style={{
+                  padding: '10px 20px',
+                  background: '#f0f0f0',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer'
+                }}
+              >{label}</button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontSize: '14px', color: '#666', marginBottom: '10px' }}>Popular Destinations</div>
           {hotspots.map((hotspot) => (
             <div
               key={hotspot.id}
-              className="hotspot-item"
-              onClick={() => setCurrentScreen('providers')}
+              onClick={() => goToScreen('providers')}
+              style={{
+                padding: '15px',
+                background: '#f8f8f8',
+                borderRadius: '8px',
+                marginBottom: '10px',
+                cursor: 'pointer'
+              }}
             >
-              <div className="hotspot-item-info">
-                <span className={`status-dot ${hotspot.status}`}></span>
-                <div>
-                  <div className="hotspot-name">{hotspot.name}</div>
-                  <div className="hotspot-distance">
-                    {hotspot.count} autos available
-                  </div>
-                </div>
+              <div style={{ fontWeight: 600 }}>{hotspot.name}</div>
+              <div style={{ fontSize: '14px', color: '#666' }}>
+                ~15 mins • {hotspot.provider_count} providers
               </div>
-              <div className="hotspot-arrow">→</div>
             </div>
           ))}
         </div>
       </div>
-    </div>
-  );
+    );
+  }
 
-  const DestinationScreen = () => (
-    <div className="screen destination-screen">
-      <div className="header">
-        <button onClick={() => setCurrentScreen('map')} className="back-btn">
-          <ArrowLeft size={24} />
-        </button>
-        <input
-          type="text"
-          placeholder="Search destination"
-          className="destination-input"
-          value={selectedDestination}
-          onChange={(e) => setSelectedDestination(e.target.value)}
-          autoFocus
-        />
-      </div>
-
-      <div className="quick-access">
-        <h4>Quick Access</h4>
-        <div className="quick-buttons">
-          <button onClick={() => setCurrentScreen('providers')}>🏠 Home</button>
-          <button onClick={() => setCurrentScreen('providers')}>💼 Work</button>
-          <button onClick={() => setCurrentScreen('providers')}>
-            🎓 College
-          </button>
-        </div>
-      </div>
-
-      <div className="popular-destinations">
-        <h4>Popular Destinations</h4>
-        <div
-          className="destination-item"
-          onClick={() => setCurrentScreen('providers')}
-        >
+  // Provider List Screen
+  if (currentScreen === 'providers') {
+    return (
+      <div style={{ height: '100vh', padding: '20px', fontFamily: 'system-ui, -apple-system, sans-serif', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
+          <span onClick={() => goToScreen('destination')} style={{ cursor: 'pointer', fontSize: '24px' }}>←</span>
           <div>
-            <strong>Koramangala</strong>
-            <p>~15 mins • ₹40-50</p>
+            <div style={{ fontSize: '18px', fontWeight: 600 }}>Available Rides</div>
+            <div style={{ fontSize: '14px', color: '#666' }}>{providers.length} providers online</div>
           </div>
-          <ArrowLeft size={18} style={{ transform: 'rotate(180deg)' }} />
         </div>
-        <div
-          className="destination-item"
-          onClick={() => setCurrentScreen('providers')}
-        >
-          <div>
-            <strong>Whitefield</strong>
-            <p>~25 mins • ₹60-80</p>
-          </div>
-          <ArrowLeft size={18} style={{ transform: 'rotate(180deg)' }} />
-        </div>
-        <div
-          className="destination-item"
-          onClick={() => setCurrentScreen('providers')}
-        >
-          <div>
-            <strong>Electronic City</strong>
-            <p>~30 mins • ₹80-100</p>
-          </div>
-          <ArrowLeft size={18} style={{ transform: 'rotate(180deg)' }} />
-        </div>
-      </div>
-    </div>
-  );
 
-  const ProvidersScreen = () => (
-    <div className="screen providers-screen">
-      <div className="header">
-        <button
-          onClick={() => setCurrentScreen('destination')}
-          className="back-btn"
-        >
-          <ArrowLeft size={24} />
-        </button>
-        <div>
-          <h3>MG Road → Koramangala</h3>
-          <p>{providers.length} providers available</p>
-        </div>
-      </div>
-
-      <div className="providers-list">
         {providers.map((provider) => (
           <div
             key={provider.id}
-            className="provider-card"
-            onClick={() => setCurrentScreen('confirmation')}
+            onClick={() => bookRide(provider)}
+            style={{
+              background: '#f8f8f8',
+              borderRadius: '12px',
+              padding: '15px',
+              marginBottom: '12px',
+              cursor: 'pointer'
+            }}
           >
-            <div className="provider-header">
-              <div className="provider-info">
-                <h4>{provider.name}</h4>
-                <p>{provider.vehicle}</p>
-                <div className="rating">
-                  <Star size={14} fill="#ffa500" color="#ffa500" />
-                  <span>
-                    {provider.rating} ({provider.reviews})
-                  </span>
-                </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+              <div>
+                <div style={{ fontSize: '16px', fontWeight: 600 }}>{provider.name}</div>
+                <div style={{ fontSize: '14px', color: '#666' }}>{provider.vehicle_number}</div>
+                <div style={{ fontSize: '14px', color: '#666' }}>⭐ {provider.rating}</div>
               </div>
-              <div className="provider-eta">
-                <div className="eta-time">{provider.eta}</div>
-                <div className="eta-label">mins away</div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: '20px', fontWeight: 600, color: '#667eea' }}>₹45</div>
               </div>
             </div>
-            <div className="provider-details">
-              <div className="seats-info">
-                {[...Array(3)].map((_, i) => (
-                  <div
-                    key={i}
-                    className={`seat-icon ${
-                      i < provider.seatsAvailable ? 'available' : ''
-                    }`}
-                  >
-                    {i < provider.seatsAvailable ? '✓' : '×'}
-                  </div>
-                ))}
-                <span>{provider.seatsAvailable} seats left</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontSize: '14px', color: '#666' }}>
+                {provider.seats_available} {provider.seats_available === 1 ? 'seat' : 'seats'} available
               </div>
-              <div className="fare">₹{provider.fare}</div>
             </div>
           </div>
         ))}
       </div>
-    </div>
-  );
+    );
+  }
 
-  const ConfirmationScreen = () => (
-    <div className="screen confirmation-screen">
-      <div className="success-icon">✓</div>
-      <h2>Ride Confirmed!</h2>
-      <p className="confirmation-subtitle">Your seat has been reserved</p>
+  // Confirmation Screen
+  if (currentScreen === 'confirmation') {
+    return (
+      <div style={{
+        height: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: '30px',
+        fontFamily: 'system-ui, -apple-system, sans-serif'
+      }}>
+        <div style={{
+          width: '100px',
+          height: '100px',
+          background: '#4caf50',
+          borderRadius: '50%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: 'white',
+          fontSize: '48px',
+          marginBottom: '20px'
+        }}>✓</div>
 
-      <div className="trip-details">
-        <div className="detail-row">
-          <span>Driver</span>
-          <strong>Ravi Kumar</strong>
+        <div style={{ fontSize: '24px', fontWeight: 600, marginBottom: '10px' }}>Ride Confirmed!</div>
+        <div style={{ fontSize: '16px', color: '#666', textAlign: 'center', marginBottom: '30px' }}>
+          Your seat has been reserved
         </div>
-        <div className="detail-row">
-          <span>Vehicle</span>
-          <strong>KA-01-AB-1234</strong>
-        </div>
-        <div className="detail-row">
-          <span>Pickup</span>
-          <strong>MG Road Hotspot</strong>
-        </div>
-        <div className="detail-row">
-          <span>Drop</span>
-          <strong>Koramangala</strong>
-        </div>
-        <div className="detail-row">
-          <span>ETA</span>
-          <strong>2 minutes</strong>
-        </div>
-        <div className="detail-row">
-          <span>Fare</span>
-          <strong className="fare-amount">₹45</strong>
-        </div>
+
+        {selectedProvider && (
+          <div style={{
+            width: '100%',
+            background: '#f8f8f8',
+            borderRadius: '12px',
+            padding: '20px',
+            marginBottom: '20px'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <span style={{ color: '#666', fontSize: '14px' }}>Driver</span>
+              <span style={{ fontWeight: 600, fontSize: '14px' }}>{selectedProvider.name}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <span style={{ color: '#666', fontSize: '14px' }}>Vehicle</span>
+              <span style={{ fontWeight: 600, fontSize: '14px' }}>{selectedProvider.vehicle_number}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <span style={{ color: '#666', fontSize: '14px' }}>Rating</span>
+              <span style={{ fontWeight: 600, fontSize: '14px' }}>⭐ {selectedProvider.rating}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: '#666', fontSize: '14px' }}>Fare</span>
+              <span style={{ fontWeight: 600, fontSize: '18px', color: '#667eea' }}>₹45</span>
+            </div>
+          </div>
+        )}
+
+        <button
+          onClick={() => goToScreen('map')}
+          style={{
+            width: '100%',
+            padding: '16px',
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            color: 'white',
+            border: 'none',
+            borderRadius: '12px',
+            fontSize: '16px',
+            fontWeight: 600,
+            cursor: 'pointer'
+          }}
+        >Book Another Ride</button>
       </div>
+    );
+  }
 
-      <button
-        className="btn-primary"
-        onClick={() => alert('Live tracking coming soon!')}
-      >
-        <Navigation size={18} />
-        Track Driver
-      </button>
-      <button className="btn-secondary" onClick={() => setCurrentScreen('map')}>
-        Book Another Ride
-      </button>
-    </div>
-  );
+  return null;
+}
 
-  return (
-    <div className="app-container">
-      <style>{`
-        * {
-          margin: 0;
-          padding: 0;
-          box-sizing: border-box;
-        }
-
-        body {
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          -webkit-font-smoothing: antialiased;
-          overflow: hidden;
-        }
-
-        .app-container {
-          max-width: 480px;
-          margin: 0 auto;
-          height: 100vh;
-          background: white;
-          position: relative;
-          overflow: hidden;
-        }
-
-        .screen {
-          position: absolute;
-          top: 0;
-          left: 0;
-          width: 100%;
-          height: 100%;
-          display: flex;
-          flex-direction: column;
-        }
-
-        .splash-screen {
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          color: white;
-          justify-content: center;
-          align-items: center;
-          padding: 40px;
-        }
-
-        .logo {
-          width: 120px;
-          height: 120px;
-          background: white;
-          border-radius: 30px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 64px;
-          font-weight: bold;
-          color: #667eea;
-          margin-bottom: 30px;
-          box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-        }
-
-        .tagline {
-          font-size: 32px;
-          font-weight: 600;
-          margin-bottom: 10px;
-        }
-
-        .subtitle {
-          font-size: 16px;
-          opacity: 0.9;
-          text-align: center;
-        }
-
-        .onboarding-screen {
-          padding: 30px;
-        }
-
-        .skip-btn {
-          align-self: flex-end;
-          padding: 8px 16px;
-          background: #f0f0f0;
-          border: none;
-          border-radius: 20px;
-          color: #666;
-          cursor: pointer;
-          font-size: 14px;
-        }
-
-        .onboarding-content {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          justify-content: center;
-          gap: 20px;
-        }
-
-        .feature-card {
-          padding: 24px;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          border-radius: 16px;
-          color: white;
-        }
-
-        .feature-card svg {
-          margin-bottom: 12px;
-        }
-
-        .feature-card h3 {
-          font-size: 18px;
-          margin-bottom: 8px;
-        }
-
-        .feature-card p {
-          font-size: 14px;
-          opacity: 0.9;
-        }
-
-        .cta-section {
-          padding: 20px 0;
-        }
-
-        .btn-primary, .btn-secondary {
-          width: 100%;
-          padding: 16px;
-          border: none;
-          border-radius: 12px;
-          font-size: 16px;
-          font-weight: 600;
-          cursor: pointer;
-          margin-bottom: 12px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-        }
-
-        .btn-primary {
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          color: white;
-        }
-
-        .btn-secondary {
-          background: #f5f5f5;
-          color: #333;
-        }
-
-        .map-screen {
-          position: relative;
-          background: #f0f0f0;
-        }
-
-        .map-container {
-          flex: 1;
-          position: relative;
-          background: linear-gradient(135deg, #e8f5e9 0%, #fff3e0 100%);
-          overflow: hidden;
-        }
-
-        .map-grid {
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background-image: 
-            linear-gradient(rgba(0,0,0,0.05) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(0,0,0,0.05) 1px, transparent 1px);
-          background-size: 50px 50px;
-        }
-
-        .search-bar {
-          position: absolute;
-          top: 20px;
-          left: 20px;
-          right: 20px;
-          background: white;
-          border-radius: 12px;
-          padding: 12px 16px;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          z-index: 1000;
-          cursor: pointer;
-        }
-
-        .search-bar input {
-          flex: 1;
-          border: none;
-          outline: none;
-          font-size: 16px;
-          cursor: pointer;
-          background: transparent;
-        }
-
-        .user-marker {
-          z-index: 100;
-        }
-
-        .user-dot {
-          width: 40px;
-          height: 40px;
-          background: #4285f4;
-          border: 3px solid white;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-          position: relative;
-          z-index: 2;
-        }
-
-        .pulse-ring {
-          position: absolute;
-          width: 60px;
-          height: 60px;
-          border: 3px solid #4285f4;
-          border-radius: 50%;
-          animation: pulse-ring 2s ease-out infinite;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-        }
-
-        @keyframes pulse-ring {
-          0% {
-            transform: translate(-50%, -50%) scale(0.8);
-            opacity: 1;
-          }
-          100% {
-            transform: translate(-50%, -50%) scale(1.5);
-            opacity: 0;
-          }
-        }
-
-        .hotspot-marker {
-          cursor: pointer;
-          z-index: 50;
-        }
-
-        .hotspot-badge {
-          width: 70px;
-          height: 70px;
-          background: white;
-          border-radius: 50%;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-          position: relative;
-        }
-
-        .hotspot-badge.high {
-          border: 3px solid #4caf50;
-        }
-
-        .hotspot-badge.medium {
-          border: 3px solid #ff9800;
-        }
-
-        .hotspot-badge.low {
-          border: 3px solid #f44336;
-        }
-
-        .hotspot-icon {
-          font-size: 24px;
-        }
-
-        .hotspot-count {
-          font-size: 13px;
-          font-weight: 600;
-          color: #666;
-        }
-
-        .hotspot-label {
-          position: absolute;
-          top: 100%;
-          left: 50%;
-          transform: translateX(-50%);
-          margin-top: 8px;
-          font-size: 12px;
-          font-weight: 600;
-          background: white;
-          padding: 4px 8px;
-          border-radius: 4px;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-          white-space: nowrap;
-        }
-
-        .bottom-sheet {
-          position: absolute;
-          bottom: 0;
-          left: 0;
-          right: 0;
-          background: white;
-          border-radius: 20px 20px 0 0;
-          padding: 20px;
-          box-shadow: 0 -4px 12px rgba(0,0,0,0.1);
-          z-index: 1000;
-          max-height: 45%;
-          overflow-y: auto;
-        }
-
-        .sheet-handle {
-          width: 40px;
-          height: 4px;
-          background: #ddd;
-          border-radius: 2px;
-          margin: 0 auto 16px;
-        }
-
-        .bottom-sheet h3 {
-          font-size: 18px;
-          margin-bottom: 8px;
-        }
-
-        .bottom-sheet p {
-          color: #666;
-          font-size: 14px;
-          margin-bottom: 16px;
-        }
-
-        .hotspot-list {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-        }
-
-        .hotspot-item {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 12px;
-          background: #f8f8f8;
-          border-radius: 8px;
-          cursor: pointer;
-        }
-
-        .hotspot-item-info {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-
-        .status-dot {
-          width: 12px;
-          height: 12px;
-          border-radius: 50%;
-        }
-
-        .status-dot.high {
-          background: #4caf50;
-        }
-
-        .status-dot.medium {
-          background: #ff9800;
-        }
-
-        .status-dot.low {
-          background: #f44336;
-        }
-
-        .hotspot-name {
-          font-weight: 600;
-          font-size: 14px;
-        }
-
-        .hotspot-distance {
-          font-size: 12px;
-          color: #666;
-        }
-
-        .hotspot-arrow {
-          color: #999;
-          font-size: 18px;
-        }
-
-        .destination-screen {
-          padding: 20px;
-        }
-
-        .header {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          margin-bottom: 24px;
-        }
-
-        .back-btn {
-          background: none;
-          border: none;
-          cursor: pointer;
-          padding: 4px;
-          color: #333;
-          display: flex;
-          align-items: center;
-        }
-
-        .destination-input {
-          flex: 1;
-          padding: 12px;
-          border: 1px solid #ddd;
-          border-radius: 8px;
-          font-size: 16px;
-          outline: none;
-        }
-
-        .quick-access, .popular-destinations {
-          margin-bottom: 24px;
-        }
-
-        .quick-access h4, .popular-destinations h4 {
-          font-size: 14px;
-          color: #666;
-          margin-bottom: 12px;
-          font-weight: 600;
-        }
-
-        .quick-buttons {
-          display: flex;
-          gap: 10px;
-        }
-
-        .quick-buttons button {
-          padding: 10px 16px;
-          background: #f0f0f0;
-          border: none;
-          border-radius: 8px;
-          cursor: pointer;
-          font-size: 14px;
-        }
-
-        .destination-item {
-          background: #f8f8f8;
-          border-radius: 12px;
-          padding: 16px;
-          margin-bottom: 12px;
-          cursor: pointer;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-
-        .destination-item strong {
-          display: block;
-          margin-bottom: 4px;
-          font-size: 16px;
-        }
-
-        .destination-item p {
-          color: #666;
-          font-size: 14px;
-        }
-
-        .providers-screen {
-          padding: 20px;
-          overflow-y: auto;
-        }
-
-        .header h3 {
-          font-size: 18px;
-          margin-bottom: 4px;
-        }
-
-        .header p {
-          color: #666;
-          font-size: 14px;
-        }
-
-        .providers-list {
-          margin-top: 20px;
-        }
-
-        .provider-card {
-          background: #f8f8f8;
-          border-radius: 12px;
-          padding: 16px;
-          margin-bottom: 12px;
-          cursor: pointer;
-        }
-
-        .provider-header {
-          display: flex;
-          justify-content: space-between;
-          margin-bottom: 12px;
-        }
-
-        .provider-info h4 {
-          font-size: 16px;
-          margin-bottom: 4px;
-        }
-
-        .provider-info p {
-          font-size: 14px;
-          color: #666;
-          margin-bottom: 4px;
-        }
-
-        .rating {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          font-size: 14px;
-          color: #666;
-        }
-
-        .provider-eta {
-          text-align: right;
-        }
-
-        .eta-time {
-          font-size: 24px;
-          font-weight: 600;
-          color: #667eea;
-          line-height: 1;
-        }
-
-        .eta-label {
-          font-size: 12px;
-          color: #999;
-        }
-
-        .provider-details {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-
-        .seats-info {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-
-        .seat-icon {
-          width: 24px;
-          height: 24px;
-          background: #e0e0e0;
-          border-radius: 4px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 12px;
-          font-weight: 600;
-        }
-
-        .seat-icon.available {
-          background: #4caf50;
-          color: white;
-        }
-
-        .seats-info span {
-          font-size: 14px;
-          color: #666;
-        }
-
-        .fare {
-          font-size: 20px;
-          font-weight: 600;
-          color: #333;
-        }
-
-        .confirmation-screen {
-          padding: 40px 30px;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .success-icon {
-          width: 100px;
-          height: 100px;
-          background: #4caf50;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: white;
-          font-size: 48px;
-          margin-bottom: 20px;
-        }
-
-        .confirmation-screen h2 {
-          font-size: 28px;
-          margin-bottom: 8px;
-        }
-
-        .confirmation-subtitle {
-          color: #666;
-          margin-bottom: 30px;
-        }
-
-        .trip-details {
-          width: 100%;
-          background: #f8f8f8;
-          border-radius: 12px;
-          padding: 20px;
-          margin-bottom: 20px;
-        }
-
-        .detail-row {
-          display: flex;
-          justify-content: space-between;
-          margin-bottom: 12px;
-        }
-
-        .detail-row:last-child {
-          margin-bottom: 0;
-          padding-top: 12px;
-          border-top: 2px solid #e0e0e0;
-        }
-
-        .detail-row span {
-          color: #666;
-          font-size: 14px;
-        }
-
-        .detail-row strong {
-          font-size: 14px;
-        }
-
-        .fare-amount {
-          color: #667eea;
-          font-size: 18px;
-        }
-      `}</style>
-
-      {currentScreen === 'splash' && <SplashScreen />}
-      {currentScreen === 'onboarding' && <OnboardingScreen />}
-      {currentScreen === 'map' && <MapScreen />}
-      {currentScreen === 'destination' && <DestinationScreen />}
-      {currentScreen === 'providers' && <ProvidersScreen />}
-      {currentScreen === 'confirmation' && <ConfirmationScreen />}
-    </div>
-  );
-};
-
-export default JammApp;
+export default App;

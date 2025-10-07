@@ -1,4 +1,6 @@
+
 import { useState, useEffect } from 'react';
+import { supabase } from './supabaseClient';
 import {
   MapPin,
   Navigation,
@@ -39,65 +41,9 @@ const JammApp = () => {
   const [, setUserLocation] = useState<Location | null>(null);
   const [selectedDestination, setSelectedDestination] = useState('');
 
-  const hotspots: Hotspot[] = [
-    {
-      id: 1,
-      name: 'MG Road',
-      lat: 12.9756,
-      lng: 77.606,
-      count: 5,
-      status: 'high',
-    },
-    {
-      id: 2,
-      name: 'Koramangala',
-      lat: 12.9352,
-      lng: 77.6245,
-      count: 3,
-      status: 'medium',
-    },
-    {
-      id: 3,
-      name: 'Indiranagar',
-      lat: 12.9719,
-      lng: 77.6412,
-      count: 1,
-      status: 'low',
-    },
-  ];
+  const [hotspots, setHotspots] = useState<Hotspot[]>([]);
 
-  const providers: Provider[] = [
-    {
-      id: 1,
-      name: 'Ravi Kumar',
-      vehicle: 'KA-01-AB-1234',
-      rating: 4.8,
-      reviews: 234,
-      eta: 2,
-      seatsAvailable: 2,
-      fare: 45,
-    },
-    {
-      id: 2,
-      name: 'Suresh Babu',
-      vehicle: 'KA-05-CD-5678',
-      rating: 4.6,
-      reviews: 189,
-      eta: 5,
-      seatsAvailable: 1,
-      fare: 40,
-    },
-    {
-      id: 3,
-      name: 'Mohammed Ali',
-      vehicle: 'KA-03-EF-9012',
-      rating: 4.9,
-      reviews: 412,
-      eta: 8,
-      seatsAvailable: 3,
-      fare: 50,
-    },
-  ];
+  const [providers, setProviders] = useState<Provider[]>([]);
 
   useEffect(() => {
     if (currentScreen === 'splash') {
@@ -123,6 +69,65 @@ const JammApp = () => {
       setUserLocation({ lat: 12.9716, lng: 77.5946 });
     }
   }, []);
+
+  // Fetch hotspots from Supabase
+useEffect(() => {
+  async function fetchHotspots() {
+    const { data, error } = await supabase
+      .from('hotspots')
+      .select('*');
+    
+    if (error) {
+      console.error('Error fetching hotspots:', error);
+      return;
+    }
+    
+    if (data) {
+      const formattedHotspots = data.map(h => ({
+        id: h.id,
+        name: h.name,
+        lat: h.latitude,
+        lng: h.longitude,
+        count: h.provider_count,
+        status: h.status as 'high' | 'medium' | 'low'
+      }));
+      setHotspots(formattedHotspots);
+    }
+  }
+  
+  fetchHotspots();
+}, []);
+
+// Fetch providers from Supabase
+useEffect(() => {
+  async function fetchProviders() {
+    const { data, error } = await supabase
+      .from('providers')
+      .select('*')
+      .eq('is_online', true);
+    
+    if (error) {
+      console.error('Error fetching providers:', error);
+      return;
+    }
+    
+    if (data) {
+      const formattedProviders = data.map(p => ({
+        id: p.id,
+        name: p.name,
+        vehicle: p.vehicle_number,
+        rating: p.rating,
+        reviews: 234, // Mock for now
+        eta: Math.floor(Math.random() * 10) + 1, // Mock ETA
+        seatsAvailable: p.seats_available,
+        fare: 45 // Mock fare
+      }));
+      setProviders(formattedProviders);
+    }
+  }
+  
+  fetchProviders();
+}, []);
 
   const SplashScreen = () => (
     <div className="screen splash-screen">

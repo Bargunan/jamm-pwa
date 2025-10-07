@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
-import { Icon } from 'leaflet';
+import { useState, useEffect, useRef } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, Circle, Polyline, useMap } from 'react-leaflet';
+import { Icon, type LatLngExpression } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { supabase } from './supabaseClient';
 
-// Fix for default marker icons in Leaflet
+// Fix for default marker icons
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
@@ -15,6 +15,23 @@ Icon.Default.mergeOptions({
   iconUrl: markerIcon,
   iconRetinaUrl: markerIcon2x,
   shadowUrl: markerShadow,
+});
+
+// Custom auto icon for providers
+// Custom auto icon for providers (using data URI without btoa)
+const autoIcon = new Icon({
+  iconUrl: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
+      <circle cx="20" cy="20" r="18" fill="#667eea" stroke="white" stroke-width="3"/>
+      <path d="M 12 18 L 16 15 L 24 15 L 28 18 L 28 25 L 12 25 Z" fill="white"/>
+      <circle cx="16" cy="25" r="2" fill="#333"/>
+      <circle cx="24" cy="25" r="2" fill="#333"/>
+      <rect x="14" y="18" width="12" height="5" fill="white" opacity="0.5"/>
+    </svg>
+  `),
+  iconSize: [40, 40],
+  iconAnchor: [20, 20],
+  popupAnchor: [0, -20]
 });
 
 interface Hotspot {
@@ -35,9 +52,29 @@ interface Provider {
   seats_available: number;
   rating: number;
   is_online: boolean;
+  current_route?: {
+    pickup: { lat: number; lng: number; name: string };
+    drop: { lat: number; lng: number; name: string };
+  };
 }
 
 type Screen = 'splash' | 'onboarding' | 'map' | 'destination' | 'providers' | 'confirmation';
+
+// Component to handle map updates when providers change
+function MapUpdater({ providers }: { providers: Provider[] }) {
+  const map = useMap();
+  
+  useEffect(() => {
+    if (providers.length > 0) {
+      const bounds = providers.map(p => [p.latitude, p.longitude] as LatLngExpression);
+      if (bounds.length > 0) {
+        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
+      }
+    }
+  }, [providers, map]);
+  
+  return null;
+}
 
 function App() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('splash');
@@ -45,14 +82,55 @@ function App() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showProviderMovement, setShowProviderMovement] = useState(false);
+  const movementInterval = useRef<NodeJS.Timeout | null>(null);
 
-  // User location (Bangalore city center as default)
+  // User location (Bangalore city center)
   const userLocation = { lat: 12.9716, lng: 77.5946 };
 
   // Fetch hotspots from Supabase
   useEffect(() => {
     fetchHotspots();
+    fetchProviders();
   }, []);
+
+  // Set up real-time subscription for provider updates
+  useEffect(() => {
+    const channel = supabase
+      .channel('provider-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'providers'
+        },
+        (payload) => {
+          console.log('Provider update:', payload);
+          fetchProviders(); // Refresh providers on any change
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  // Simulate provider movement for demo purposes
+  useEffect(() => {
+    if (showProviderMovement && providers.length > 0) {
+      movementInterval.current = setInterval(() => {
+        simulateProviderMovement();
+      }, 3000); // Update every 3 seconds
+
+      return () => {
+        if (movementInterval.current) {
+          clearInterval(movementInterval.current);
+        }
+      };
+    }
+  }, [showProviderMovement, providers]);
 
   const fetchHotspots = async () => {
     try {
@@ -69,7 +147,6 @@ function App() {
     }
   };
 
-  // Fetch providers from Supabase
   const fetchProviders = async () => {
     try {
       const { data, error } = await supabase
@@ -84,6 +161,29 @@ function App() {
     }
   };
 
+  // Simulate provider movement (for demo)
+  const simulateProviderMovement = async () => {
+    try {
+      // Update each provider's location slightly
+      for (const provider of providers) {
+        const latChange = (Math.random() - 0.5) * 0.002; // Small random movement
+        const lngChange = (Math.random() - 0.5) * 0.002;
+        
+        const { error } = await supabase
+          .from('providers')
+          .update({
+            latitude: provider.latitude + latChange,
+            longitude: provider.longitude + lngChange
+          })
+          .eq('id', provider.id);
+
+        if (error) throw error;
+      }
+    } catch (error) {
+      console.error('Error simulating movement:', error);
+    }
+  };
+
   // Auto-advance from splash
   useEffect(() => {
     if (currentScreen === 'splash') {
@@ -93,8 +193,10 @@ function App() {
   }, [currentScreen]);
 
   const goToScreen = (screen: Screen) => {
-    if (screen === 'providers') {
-      fetchProviders();
+    if (screen === 'map') {
+      setShowProviderMovement(true); // Start movement simulation when on map
+    } else {
+      setShowProviderMovement(false); // Stop when leaving map
     }
     setCurrentScreen(screen);
   };
@@ -207,7 +309,7 @@ function App() {
     );
   }
 
-  // Map Screen with Real Leaflet Map
+  // Map Screen with Real-Time Providers
   if (currentScreen === 'map') {
     return (
       <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
@@ -231,7 +333,27 @@ function App() {
           <span style={{ color: '#999' }}>Where to?</span>
         </div>
 
-        {/* Real Leaflet Map */}
+        {/* Real-time indicator */}
+        <div style={{
+          position: 'absolute',
+          top: '80px',
+          right: '20px',
+          background: '#4caf50',
+          color: 'white',
+          padding: '8px 12px',
+          borderRadius: '20px',
+          fontSize: '12px',
+          zIndex: 1000,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '5px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+        }}>
+          <span style={{ width: '8px', height: '8px', background: 'white', borderRadius: '50%', animation: 'pulse 2s infinite' }}></span>
+          Live Tracking
+        </div>
+
+        {/* Leaflet Map with Providers */}
         <MapContainer
           center={[userLocation.lat, userLocation.lng]}
           zoom={13}
@@ -247,7 +369,7 @@ function App() {
             <Popup>Your Location</Popup>
           </Marker>
 
-          {/* Hotspots as Circles */}
+          {/* Hotspots */}
           {hotspots.map((hotspot) => (
             <Circle
               key={hotspot.id}
@@ -281,6 +403,64 @@ function App() {
               </Popup>
             </Circle>
           ))}
+
+          {/* Real-Time Provider Markers */}
+          {providers.map((provider) => (
+            <Marker
+              key={provider.id}
+              position={[provider.latitude, provider.longitude]}
+              icon={autoIcon}
+            >
+              <Popup>
+                <div style={{ textAlign: 'center', minWidth: '150px' }}>
+                  <strong>{provider.name}</strong><br />
+                  {provider.vehicle_number}<br />
+                  ⭐ {provider.rating} | {provider.seats_available} seats<br />
+                  <button
+                    onClick={() => bookRide(provider)}
+                    style={{
+                      marginTop: '8px',
+                      padding: '6px 12px',
+                      background: '#4caf50',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      width: '100%'
+                    }}
+                  >
+                    Book Now - ₹45
+                  </button>
+                </div>
+              </Popup>
+            </Marker>
+          ))}
+
+          {/* Route Lines (if provider has route data) */}
+          {providers.map((provider) => {
+            if (provider.current_route) {
+              const route: LatLngExpression[] = [
+                [provider.current_route.pickup.lat, provider.current_route.pickup.lng],
+                [provider.latitude, provider.longitude],
+                [provider.current_route.drop.lat, provider.current_route.drop.lng]
+              ];
+              return (
+                <Polyline
+                  key={`route-${provider.id}`}
+                  positions={route}
+                  pathOptions={{
+                    color: '#667eea',
+                    weight: 3,
+                    opacity: 0.6,
+                    dashArray: '10, 10'
+                  }}
+                />
+              );
+            }
+            return null;
+          })}
+
+          <MapUpdater providers={providers} />
         </MapContainer>
 
         {/* Bottom Sheet */}
@@ -297,16 +477,25 @@ function App() {
           zIndex: 1000
         }}>
           <div style={{ width: '40px', height: '4px', background: '#ddd', borderRadius: '2px', margin: '0 auto 20px' }}></div>
-          <div style={{ fontSize: '18px', fontWeight: 600, marginBottom: '10px' }}>Nearby Hotspots</div>
+          <div style={{ fontSize: '18px', fontWeight: 600, marginBottom: '10px' }}>
+            {providers.length} Autos Nearby
+          </div>
           <div style={{ fontSize: '14px', color: '#666' }}>
-            {loading ? 'Loading hotspots...' : `${hotspots.length} locations available`}
+            {loading ? 'Loading...' : `Tap on auto icons to book instantly`}
           </div>
         </div>
+
+        <style>{`
+          @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+          }
+        `}</style>
       </div>
     );
   }
 
-  // Destination Selection Screen
+  // Destination Screen
   if (currentScreen === 'destination') {
     return (
       <div style={{ height: '100vh', padding: '20px', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
@@ -401,6 +590,7 @@ function App() {
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: '20px', fontWeight: 600, color: '#667eea' }}>₹45</div>
+                <div style={{ fontSize: '12px', color: '#4caf50' }}>● Live</div>
               </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

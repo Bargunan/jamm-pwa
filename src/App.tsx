@@ -63,17 +63,17 @@ interface Provider {
 
 type Screen = 'checking' | 'blocked' | 'splash' | 'onboarding' | 'map' | 'destination' | 'providers' | 'confirmation';
 
-function MapUpdater({ providers }: { providers: Provider[] }) {
+
+
+// Component to recenter map on user location
+function MapRecenter({ location }: { location: {lat: number, lng: number} | null }) {
   const map = useMap();
   
   useEffect(() => {
-    if (providers.length > 0) {
-      const bounds = providers.map(p => [p.latitude, p.longitude] as LatLngExpression);
-      if (bounds.length > 0) {
-        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
-      }
+    if (location) {
+      map.setView([location.lat, location.lng], 14);
     }
-  }, [providers, map]);
+  }, [location, map]);
   
   return null;
 }
@@ -86,8 +86,42 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [showProviderMovement, setShowProviderMovement] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
-  const [locationChecked, setLocationChecked] = useState(false);
-  const movementInterval = useRef<NodeJS.Timeout | null>(null);
+const [locationChecked, setLocationChecked] = useState(false);
+const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
+const movementInterval = useRef<number | null>(null);
+
+// Get user's current location
+const getUserLocation = () => {
+  if ('geolocation' in navigator) {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setUserLocation({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude
+        });
+      },
+      (error) => {
+        console.error('Error getting location:', error);
+        // Fallback to Trichy center if location fails
+        setUserLocation(TRICHY_CENTER);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 5000,
+        maximumAge: 0
+      }
+    );
+  } else {
+    setUserLocation(TRICHY_CENTER);
+  }
+};
+
+// Request location when map loads
+useEffect(() => {
+  if (currentScreen === 'map' && !userLocation) {
+    getUserLocation();
+  }
+}, [currentScreen]);
 
   // Calculate distance between two coordinates (Haversine formula)
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
@@ -614,191 +648,238 @@ const checkLocation = () => {
   }
 
   // Map Screen
-  if (currentScreen === 'map') {
-    return (
-      <>
-        <DemoBanner />
-        <div style={{ 
-          height: '100vh', 
-          display: 'flex', 
-          flexDirection: 'column', 
-          fontFamily: 'system-ui, -apple-system, sans-serif',
-          paddingTop: demoMode ? '50px' : '0'
-        }}>
-          <div style={{
+if (currentScreen === 'map') {
+  const mapCenter = userLocation || TRICHY_CENTER;
+  
+  return (
+    <>
+      <DemoBanner />
+      <div style={{ 
+        height: '100vh', 
+        display: 'flex', 
+        flexDirection: 'column', 
+        fontFamily: 'system-ui, -apple-system, sans-serif',
+        paddingTop: demoMode ? '50px' : '0'
+      }}>
+        <div style={{
+          position: 'absolute',
+          top: demoMode ? '70px' : '20px',
+          left: '20px',
+          right: '20px',
+          background: 'white',
+          borderRadius: '12px',
+          padding: '12px 16px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          zIndex: 1000,
+          cursor: 'pointer'
+        }} onClick={() => goToScreen('destination')}>
+          <span>🔍</span>
+          <span style={{ color: '#999' }}>Where to?</span>
+        </div>
+
+        {/* Locate Me Button */}
+        <button
+          onClick={getUserLocation}
+          style={{
             position: 'absolute',
-            top: demoMode ? '70px' : '20px',
-            left: '20px',
+            bottom: '35%',
             right: '20px',
+            width: '50px',
+            height: '50px',
             background: 'white',
-            borderRadius: '12px',
-            padding: '12px 16px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+            border: 'none',
+            borderRadius: '50%',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
             display: 'flex',
             alignItems: 'center',
-            gap: '10px',
-            zIndex: 1000,
-            cursor: 'pointer'
-          }} onClick={() => goToScreen('destination')}>
-            <span>🔍</span>
-            <span style={{ color: '#999' }}>Where to?</span>
-          </div>
+            justifyContent: 'center',
+            fontSize: '24px',
+            cursor: 'pointer',
+            zIndex: 1000
+          }}
+          title="Locate Me"
+        >
+          📍
+        </button>
 
-          <div style={{
-            position: 'absolute',
-            top: demoMode ? '130px' : '80px',
-            right: '20px',
-            background: '#4caf50',
-            color: 'white',
-            padding: '8px 12px',
-            borderRadius: '20px',
-            fontSize: '12px',
-            zIndex: 1000,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '5px',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
-          }}>
-            <span style={{ width: '8px', height: '8px', background: 'white', borderRadius: '50%', animation: 'pulse 2s infinite' }}></span>
-            Live Tracking
-          </div>
+        <div style={{
+          position: 'absolute',
+          top: demoMode ? '130px' : '80px',
+          right: '20px',
+          background: '#4caf50',
+          color: 'white',
+          padding: '8px 12px',
+          borderRadius: '20px',
+          fontSize: '12px',
+          zIndex: 1000,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '5px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+        }}>
+          <span style={{ width: '8px', height: '8px', background: 'white', borderRadius: '50%', animation: 'pulse 2s infinite' }}></span>
+          Live Tracking
+        </div>
 
-          <MapContainer
-            center={[TRICHY_CENTER.lat, TRICHY_CENTER.lng]}
-            zoom={13}
-            style={{ height: '100%', width: '100%' }}
-          >
-            <TileLayer
-              attribution='&copy; OpenStreetMap'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
+        <MapContainer
+          center={[mapCenter.lat, mapCenter.lng]}
+          zoom={13}
+          style={{ height: '100%', width: '100%' }}
+        >
+          <TileLayer
+            attribution='&copy; OpenStreetMap'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
 
-            <Marker position={[TRICHY_CENTER.lat, TRICHY_CENTER.lng]}>
+          {/* User's Current Location Marker */}
+          {userLocation && (
+            <Circle
+              center={[userLocation.lat, userLocation.lng]}
+              radius={50}
+              pathOptions={{
+                color: '#4285f4',
+                fillColor: '#4285f4',
+                fillOpacity: 0.3
+              }}
+            >
+              <Popup>
+                <strong>You are here</strong><br />
+                Your current location
+              </Popup>
+            </Circle>
+          )}
+          
+          {userLocation && (
+            <Marker position={[userLocation.lat, userLocation.lng]}>
               <Popup>Your Location</Popup>
             </Marker>
+          )}
 
-            {hotspots.map((hotspot) => (
-              <Circle
-                key={hotspot.id}
-                center={[hotspot.latitude, hotspot.longitude]}
-                radius={150}
-                pathOptions={{
-                  color: getHotspotColor(hotspot.status),
-                  fillColor: getHotspotColor(hotspot.status),
-                  fillOpacity: 0.3
-                }}
-              >
-                <Popup>
-                  <div style={{ textAlign: 'center' }}>
-                    <strong>{hotspot.name}</strong><br />
-                    🚕 {hotspot.provider_count} autos available<br />
-                    <button
-                      onClick={() => goToScreen('providers')}
-                      style={{
-                        marginTop: '8px',
-                        padding: '6px 12px',
-                        background: '#667eea',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '6px',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      See Rides
-                    </button>
-                  </div>
-                </Popup>
-              </Circle>
-            ))}
-
-            {providers.map((provider) => (
-              <Marker
-                key={provider.id}
-                position={[provider.latitude, provider.longitude]}
-                icon={autoIcon}
-              >
-                <Popup>
-                  <div style={{ textAlign: 'center', minWidth: '150px' }}>
-                    <strong>{provider.name}</strong><br />
-                    {provider.vehicle_number}<br />
-                    ⭐ {provider.rating} | {provider.seats_available} seats<br />
-                    <button
-                      onClick={() => bookRide(provider)}
-                      style={{
-                        marginTop: '8px',
-                        padding: '6px 12px',
-                        background: '#4caf50',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        width: '100%'
-                      }}
-                    >
-                      Book Now - ₹45
-                    </button>
-                  </div>
-                </Popup>
-              </Marker>
-            ))}
-
-            {providers.map((provider) => {
-              if (provider.current_route) {
-                const route: LatLngExpression[] = [
-                  [provider.current_route.pickup.lat, provider.current_route.pickup.lng],
-                  [provider.latitude, provider.longitude],
-                  [provider.current_route.drop.lat, provider.current_route.drop.lng]
-                ];
-                return (
-                  <Polyline
-                    key={`route-${provider.id}`}
-                    positions={route}
-                    pathOptions={{
-                      color: '#667eea',
-                      weight: 3,
-                      opacity: 0.6,
-                      dashArray: '10, 10'
+          {hotspots.map((hotspot) => (
+            <Circle
+              key={hotspot.id}
+              center={[hotspot.latitude, hotspot.longitude]}
+              radius={150}
+              pathOptions={{
+                color: getHotspotColor(hotspot.status),
+                fillColor: getHotspotColor(hotspot.status),
+                fillOpacity: 0.3
+              }}
+            >
+              <Popup>
+                <div style={{ textAlign: 'center' }}>
+                  <strong>{hotspot.name}</strong><br />
+                  🚕 {hotspot.provider_count} autos available<br />
+                  <button
+                    onClick={() => goToScreen('providers')}
+                    style={{
+                      marginTop: '8px',
+                      padding: '6px 12px',
+                      background: '#667eea',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: 'pointer'
                     }}
-                  />
-                );
-              }
-              return null;
-            })}
+                  >
+                    See Rides
+                  </button>
+                </div>
+              </Popup>
+            </Circle>
+          ))}
 
-            <MapUpdater providers={providers} />
-          </MapContainer>
+          {providers.map((provider) => (
+            <Marker
+              key={provider.id}
+              position={[provider.latitude, provider.longitude]}
+              icon={autoIcon}
+            >
+              <Popup>
+                <div style={{ textAlign: 'center', minWidth: '150px' }}>
+                  <strong>{provider.name}</strong><br />
+                  {provider.vehicle_number}<br />
+                  ⭐ {provider.rating} | {provider.seats_available} seats<br />
+                  <button
+                    onClick={() => bookRide(provider)}
+                    style={{
+                      marginTop: '8px',
+                      padding: '6px 12px',
+                      background: '#4caf50',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      width: '100%'
+                    }}
+                  >
+                    Book Now - ₹45
+                  </button>
+                </div>
+              </Popup>
+            </Marker>
+          ))}
 
-          <div style={{
-            position: 'absolute',
-            bottom: 0,
-            left: 0,
-            right: 0,
-            background: 'white',
-            borderRadius: '20px 20px 0 0',
-            padding: '20px',
-            boxShadow: '0 -4px 12px rgba(0,0,0,0.1)',
-            maxHeight: '30%',
-            zIndex: 1000
-          }}>
-            <div style={{ width: '40px', height: '4px', background: '#ddd', borderRadius: '2px', margin: '0 auto 20px' }}></div>
-            <div style={{ fontSize: '18px', fontWeight: 600, marginBottom: '10px' }}>
-              {providers.length} Autos Nearby
-            </div>
-            <div style={{ fontSize: '14px', color: '#666' }}>
-              {loading ? 'Loading...' : `Tap on auto icons to book instantly`}
-            </div>
-          </div>
-
-          <style>{`
-            @keyframes pulse {
-              0%, 100% { opacity: 1; }
-              50% { opacity: 0.5; }
+          {providers.map((provider) => {
+            if (provider.current_route) {
+              const route: LatLngExpression[] = [
+                [provider.current_route.pickup.lat, provider.current_route.pickup.lng],
+                [provider.latitude, provider.longitude],
+                [provider.current_route.drop.lat, provider.current_route.drop.lng]
+              ];
+              return (
+                <Polyline
+                  key={`route-${provider.id}`}
+                  positions={route}
+                  pathOptions={{
+                    color: '#667eea',
+                    weight: 3,
+                    opacity: 0.6,
+                    dashArray: '10, 10'
+                  }}
+                />
+              );
             }
-          `}</style>
+            return null;
+          })}
+
+          <MapRecenter location={userLocation} />
+        </MapContainer>
+
+        <div style={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          background: 'white',
+          borderRadius: '20px 20px 0 0',
+          padding: '20px',
+          boxShadow: '0 -4px 12px rgba(0,0,0,0.1)',
+          maxHeight: '30%',
+          zIndex: 1000
+        }}>
+          <div style={{ width: '40px', height: '4px', background: '#ddd', borderRadius: '2px', margin: '0 auto 20px' }}></div>
+          <div style={{ fontSize: '18px', fontWeight: 600, marginBottom: '10px' }}>
+            {providers.length} Autos Nearby
+          </div>
+          <div style={{ fontSize: '14px', color: '#666' }}>
+            {loading ? 'Loading...' : `Tap on auto icons to book instantly`}
+          </div>
         </div>
-      </>
-    );
-  }
+
+        <style>{`
+          @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+          }
+        `}</style>
+      </div>
+    </>
+  );
+}
 
   // Destination Screen
   if (currentScreen === 'destination') {
